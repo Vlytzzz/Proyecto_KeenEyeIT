@@ -1,0 +1,962 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum CompanyStatus {
+  ACTIVE
+  SUSPENDED
+  FINISHED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  SUPERVISOR
+  ADMIN
+  USER
+  SUPPORT
+  ANALYST
+}
+
+enum BusinessServiceStatus {
+  OPERATIONAL
+  DEGRADED
+  INTERRUPTED
+  MAINTENANCE
+  RETIRED
+}
+
+enum BusinessServiceCriticality {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum GovernanceItemType {
+  PROCESS
+  POLICY
+  PROCEDURE
+  STANDARD
+  PLAN
+}
+
+enum GovernanceItemStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  EXPIRED
+  ARCHIVED
+}
+
+enum IsoControlDomain {
+  ORGANIZATIONAL
+  PEOPLE
+  PHYSICAL
+  TECHNOLOGICAL
+}
+
+enum ControlComplianceStatus {
+  NOT_EVALUATED
+  COMPLIANT
+  PARTIAL
+  NON_COMPLIANT
+  NOT_APPLICABLE
+}
+
+enum ControlApplicability {
+  PENDING
+  APPLICABLE
+  NOT_APPLICABLE
+}
+
+enum AiEvaluationResult {
+  FAVORABLE
+  CONTRADICTORY
+  INSUFFICIENT
+  NOT_APPLICABLE_PENDING
+  INVALID_RESPONSE
+}
+
+enum AiReviewStatus {
+  PENDING
+  APPROVED
+  CORRECTED
+  DISCARDED
+}
+
+model Company {
+  id        String        @id @default(uuid())
+  name      String
+  status    CompanyStatus @default(ACTIVE)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  users                     User[]
+  analystAssignments        AnalystCompanyAssignment[]
+  supervisorAssignments     SupervisorCompanyAssignment[]
+  assets                    Asset[]
+  businessServices          BusinessService[]
+  governanceItems           GovernanceItem[]
+  controlAssessments        CompanyControl[]
+  risks                     Risk[]
+  riskActions               RiskAction[]
+  documents                 SgsiDocument[]
+  documentChunks            DocumentChunk[]
+  aiControlEvaluations      ControlAiEvaluation[]
+  auditLogs                 AuditLog[]
+  riskMonitoringAssignments RiskMonitoringAssignment[]
+  riskMonitorings           RiskMonitoring[]
+  tickets                   Ticket[]                      @relation("CompanyTickets")
+
+  @@map("companies")
+}
+
+model User {
+  id                   String    @id @default(uuid())
+  companyId            String?
+  name                 String
+  email                String    @unique
+  passwordHash         String
+  resetPasswordToken   String?   @unique
+  resetPasswordExpires DateTime?
+  role                 UserRole
+  active               Boolean   @default(true)
+  connected            Boolean   @default(false)
+  tokenVersion         Int       @default(0)
+  lastAccessAt         DateTime?
+  isTwoFactorEnabled   Boolean   @default(true)
+  twoFactorCode        String?
+  twoFactorExpires     DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  company                            Company?                      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  analystAssignments                 AnalystCompanyAssignment[]
+  supervisorAssignments              SupervisorCompanyAssignment[] @relation("SupervisorAssignments")
+  supervisorAssignmentsCreated       SupervisorCompanyAssignment[] @relation("SupervisorAssignedBy")
+  auditLogs                          AuditLog[]
+  assignedRiskMonitorings            RiskMonitoringAssignment[]    @relation("RiskMonitoringAssignedUser")
+  createdRiskMonitoringAssignments   RiskMonitoringAssignment[]    @relation("RiskMonitoringAssignedBy")
+  cancelledRiskMonitoringAssignments RiskMonitoringAssignment[]    @relation("RiskMonitoringCancelledBy")
+  performedRiskMonitorings           RiskMonitoring[]              @relation("RiskMonitoringPerformedBy")
+  createdTickets                     Ticket[]                      @relation("TicketCreator")
+  assignedTickets                    Ticket[]                      @relation("TicketAssignee")
+  notifications                      Notification[]
+  conversations                      ConversationMember[]
+  messages                           Message[]
+  requestedAiEvaluations             ControlAiEvaluation[]         @relation("AiEvaluationRequestedBy")
+  reviewedAiEvaluations              ControlAiEvaluation[]         @relation("AiEvaluationReviewedBy")
+
+  @@index([companyId])
+  @@index([role])
+  @@map("users")
+}
+
+model AnalystCompanyAssignment {
+  id         String    @id @default(uuid())
+  analystId  String
+  companyId  String
+  active     Boolean   @default(true)
+  assignedAt DateTime  @default(now())
+  removedAt  DateTime?
+
+  analyst User    @relation(fields: [analystId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([analystId, companyId])
+  @@index([analystId])
+  @@index([companyId])
+  @@map("analyst_company_assignments")
+}
+
+enum AssetStatus {
+  ACTIVE
+  MAINTENANCE
+  RETIRED
+  LOST
+}
+
+enum AssetClassification {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+model Asset {
+  id                 String              @id @default(uuid())
+  companyId          String
+  code               String
+  name               String
+  type               String
+  description        String?
+  responsible        String
+  assignedTo         String?
+  provider           String?
+  status             AssetStatus         @default(ACTIVE)
+  classification     AssetClassification @default(INTERNAL)
+  critical           Boolean             @default(false)
+  publicIp           String?
+  privateIp          String?
+  version            String?
+  complianceProgress Int                 @default(0)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  company               Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  riskLinks             RiskAsset[]
+  businessServices      BusinessService[]
+  businessServiceAssets BusinessServiceAsset[]
+  tickets               Ticket[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([status])
+  @@index([critical])
+  @@map("assets")
+}
+
+model SupervisorCompanyAssignment {
+  id           String    @id @default(uuid())
+  supervisorId String
+  companyId    String
+  assignedById String?
+  active       Boolean   @default(true)
+  assignedAt   DateTime  @default(now())
+  removedAt    DateTime?
+
+  supervisor User    @relation("SupervisorAssignments", fields: [supervisorId], references: [id], onDelete: Cascade)
+  assignedBy User?   @relation("SupervisorAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([supervisorId, companyId])
+  @@index([supervisorId])
+  @@index([companyId])
+  @@index([assignedById])
+  @@index([active])
+  @@map("supervisor_company_assignments")
+}
+
+model BusinessService {
+  id          String                     @id @default(uuid())
+  companyId   String
+  code        String
+  name        String
+  description String?
+  process     String?
+  responsible String
+  provider    String?
+  status      BusinessServiceStatus      @default(OPERATIONAL)
+  criticality BusinessServiceCriticality @default(MEDIUM)
+  rtoMinutes  Int?
+  rpoMinutes  Int?
+  active      Boolean                    @default(true)
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+
+  company    Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assetLinks BusinessServiceAsset[]
+  asset      Asset?                 @relation(fields: [assetId], references: [id])
+  assetId    String?
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([status])
+  @@index([criticality])
+  @@index([active])
+  @@map("business_services")
+}
+
+model BusinessServiceAsset {
+  id                String   @id @default(uuid())
+  businessServiceId String
+  assetId           String
+  createdAt         DateTime @default(now())
+
+  businessService BusinessService @relation(fields: [businessServiceId], references: [id], onDelete: Cascade)
+  asset           Asset           @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([businessServiceId, assetId])
+  @@index([businessServiceId])
+  @@index([assetId])
+  @@map("business_service_assets")
+}
+
+model GovernanceItem {
+  id          String               @id @default(uuid())
+  companyId   String
+  code        String
+  name        String
+  type        GovernanceItemType
+  description String?
+  owner       String
+  version     String               @default("1.0")
+  status      GovernanceItemStatus @default(DRAFT)
+  effectiveAt DateTime?
+  reviewAt    DateTime?
+  active      Boolean              @default(true)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([type])
+  @@index([status])
+  @@index([active])
+  @@index([reviewAt])
+  @@map("governance_items")
+}
+
+model IsoControl {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  name        String
+  description String?
+  domain      IsoControlDomain
+  active      Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  companyAssessments CompanyControl[]
+
+  @@index([domain])
+  @@index([active])
+  @@map("iso_controls")
+}
+
+model CompanyControl {
+  id               String                  @id @default(uuid())
+  companyId        String
+  controlId        String
+  applicability    ControlApplicability    @default(PENDING)
+  complianceStatus ControlComplianceStatus @default(NOT_EVALUATED)
+  progress         Int                     @default(0)
+  responsible      String?
+  justification    String?
+  observations     String?
+  evidenceSummary  String?
+  evaluatedAt      DateTime?
+  nextReviewAt     DateTime?
+  active           Boolean                 @default(true)
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  company       Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  control       IsoControl            @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  riskLinks     RiskCompanyControl[]
+  aiEvaluations ControlAiEvaluation[]
+
+  @@unique([companyId, controlId])
+  @@index([companyId])
+  @@index([controlId])
+  @@index([applicability])
+  @@index([complianceStatus])
+  @@index([nextReviewAt])
+  @@map("company_controls")
+}
+
+enum RiskCategory {
+  INFORMATION_SECURITY
+  CYBERSECURITY
+  OPERATIONAL
+  LEGAL
+  COMPLIANCE
+  PRIVACY
+  CONTINUITY
+  THIRD_PARTY
+  PHYSICAL
+  OTHER
+}
+
+enum RiskStatus {
+  IDENTIFIED
+  UNDER_ANALYSIS
+  TREATMENT
+  MONITORING
+  ACCEPTED
+  CLOSED
+}
+
+enum RiskTreatment {
+  MITIGATE
+  AVOID
+  TRANSFER
+  ACCEPT
+}
+
+enum RiskActionStatus {
+  PENDING
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CANCELLED
+}
+
+model Risk {
+  id                  String        @id @default(uuid())
+  companyId           String
+  code                String
+  name                String
+  description         String?
+  category            RiskCategory
+  status              RiskStatus    @default(IDENTIFIED)
+  treatment           RiskTreatment @default(MITIGATE)
+  owner               String
+  cause               String?
+  consequence         String?
+  inherentProbability Int
+  inherentImpact      Int
+  inherentLevel       Int
+  residualProbability Int?
+  residualImpact      Int?
+  residualLevel       Int?
+  treatmentDecision   String?
+  reviewAt            DateTime?
+  active              Boolean       @default(true)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  company               Company                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assetLinks            RiskAsset[]
+  controlLinks          RiskCompanyControl[]
+  actions               RiskAction[]
+  monitoringAssignments RiskMonitoringAssignment[]
+  monitorings           RiskMonitoring[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([category])
+  @@index([status])
+  @@index([treatment])
+  @@index([inherentLevel])
+  @@index([residualLevel])
+  @@index([reviewAt])
+  @@index([active])
+  @@map("risks")
+}
+
+model RiskAsset {
+  id        String   @id @default(uuid())
+  riskId    String
+  assetId   String
+  createdAt DateTime @default(now())
+
+  risk  Risk  @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([riskId, assetId])
+  @@index([riskId])
+  @@index([assetId])
+  @@map("risk_assets")
+}
+
+model RiskCompanyControl {
+  id               String   @id @default(uuid())
+  riskId           String
+  companyControlId String
+  createdAt        DateTime @default(now())
+
+  risk           Risk           @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  companyControl CompanyControl @relation(fields: [companyControlId], references: [id], onDelete: Cascade)
+
+  @@unique([riskId, companyControlId])
+  @@index([riskId])
+  @@index([companyControlId])
+  @@map("risk_company_controls")
+}
+
+model RiskAction {
+  id          String           @id @default(uuid())
+  riskId      String
+  companyId   String
+  code        String
+  title       String
+  description String?
+  responsible String
+  status      RiskActionStatus @default(PENDING)
+  priority    Int              @default(3)
+  progress    Int              @default(0)
+  startAt     DateTime?
+  dueAt       DateTime?
+  completedAt DateTime?
+  evidence    String?
+  active      Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  risk    Risk    @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, code])
+  @@index([riskId])
+  @@index([companyId])
+  @@index([status])
+  @@index([priority])
+  @@index([dueAt])
+  @@index([active])
+  @@map("risk_actions")
+}
+
+enum DocumentCategory {
+  POLICY
+  PROCEDURE
+  PROCESS
+  EVIDENCE
+  PLAN
+  REPORT
+  CONTRACT
+  STANDARD
+  RISK
+  CONTINUITY
+  OTHER
+}
+
+enum DocumentStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  EXPIRED
+  ARCHIVED
+}
+
+enum DocumentFileType {
+  PDF
+  DOCX
+  XLSX
+  PPTX
+  IMAGE
+  TEXT
+  OTHER
+}
+
+model SgsiDocument {
+  id          String            @id @default(uuid())
+  companyId   String
+  code        String
+  title       String
+  description String?
+  category    DocumentCategory
+  status      DocumentStatus    @default(DRAFT)
+  version     String            @default("1.0")
+  owner       String
+  fileName    String?
+  fileType    DocumentFileType?
+  mimeType    String?
+  fileSize    Int?
+  storageKey  String?
+  effectiveAt DateTime?
+  reviewAt    DateTime?
+  approvedAt  DateTime?
+  active      Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  company  Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  versions SgsiDocumentVersion[]
+  chunks   DocumentChunk[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([category])
+  @@index([status])
+  @@index([reviewAt])
+  @@index([active])
+  @@map("sgsi_documents")
+}
+
+model SgsiDocumentVersion {
+  id          String            @id @default(uuid())
+  documentId  String
+  version     String
+  fileName    String?
+  fileType    DocumentFileType?
+  mimeType    String?
+  fileSize    Int?
+  storageKey  String?
+  changeNotes String?
+  createdById String?
+  createdAt   DateTime          @default(now())
+
+  document SgsiDocument    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunks   DocumentChunk[]
+
+  @@unique([documentId, version])
+  @@index([documentId])
+  @@index([createdAt])
+  @@map("sgsi_document_versions")
+}
+
+model DocumentChunk {
+  id                String   @id @default(uuid())
+  companyId         String
+  documentId        String
+  documentVersionId String
+  position          Int
+  pageNumber        Int?
+  location          String
+  content           String   @db.Text
+  contentHash       String?
+  createdAt         DateTime @default(now())
+
+  company         Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  document        SgsiDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentVersion SgsiDocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([documentVersionId, position])
+  @@index([companyId])
+  @@index([documentId])
+  @@index([documentVersionId])
+  @@index([companyId, documentId])
+  @@map("document_chunks")
+}
+
+model ControlAiEvaluation {
+  id                  String                   @id @default(uuid())
+  companyId           String
+  companyControlId    String
+  requestedById       String
+  reviewedById        String?
+  result              AiEvaluationResult
+  reviewStatus        AiReviewStatus           @default(PENDING)
+  suggestedStatus     ControlComplianceStatus?
+  summary             String                   @db.Text
+  findings            Json
+  recommendations     Json
+  evidenceSnapshot    Json
+  evidenceFingerprint String
+  model               String
+  promptVersion       String
+  inputTokens         Int?
+  outputTokens        Int?
+  startedAt           DateTime?
+  completedAt         DateTime?
+  durationMs          Int?
+  providerStatus      String?
+  providerErrorCode   String?
+  groundingScore      Int?
+  hallucinationScore  Int?
+  hallucinationRisk   String?
+  hallucinationFlags  Json?
+  rejectionReason     String?                  @db.Text
+  reviewComment       String?                  @db.Text
+  reviewedAt          DateTime?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  company        Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyControl CompanyControl @relation(fields: [companyControlId], references: [id], onDelete: Cascade)
+  requestedBy    User           @relation("AiEvaluationRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedBy     User?          @relation("AiEvaluationReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([companyControlId])
+  @@index([requestedById])
+  @@index([reviewedById])
+  @@index([reviewStatus])
+  @@index([createdAt])
+  @@index([companyId, reviewStatus])
+  @@map("control_ai_evaluations")
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+}
+
+model AuditLog {
+  id            String      @id @default(uuid())
+  actorId       String?
+  companyId     String?
+  actorName     String?
+  actorEmail    String?
+  actorRole     String?
+  companyName   String?
+  action        String
+  entity        String
+  entityId      String?
+  method        String
+  route         String
+  ipAddress     String?
+  userAgent     String?
+  statusCode    Int
+  result        AuditResult
+  durationMs    Int?
+  requestData   Json?
+  previousData  Json?
+  resultingData Json?
+  errorMessage  String?
+  createdAt     DateTime    @default(now())
+
+  actor   User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([companyId])
+  @@index([action])
+  @@index([entity])
+  @@index([entityId])
+  @@index([result])
+  @@index([createdAt])
+  @@index([companyId, createdAt])
+  @@map("audit_logs")
+}
+
+enum RiskMonitoringAssignmentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  REASSIGNED
+}
+
+enum RiskMonitoringFrequency {
+  ONCE
+  MONTHLY
+  QUARTERLY
+  SEMIANNUAL
+  ANNUAL
+}
+
+enum RiskMonitoringType {
+  SCHEDULED
+  INCIDENT
+  CONTROL_FAILURE
+  CONTEXT_CHANGE
+  AUDIT_FINDING
+  MANUAL
+}
+
+enum RiskControlEffectiveness {
+  EFFECTIVE
+  PARTIALLY_EFFECTIVE
+  INEFFECTIVE
+  NOT_EVALUATED
+}
+
+enum RiskMonitoringTrend {
+  INCREASING
+  STABLE
+  DECREASING
+  FIRST_MEASUREMENT
+}
+
+enum RiskMonitoringDecision {
+  KEEP_MONITORING
+  ADJUST_TREATMENT
+  ESCALATE
+  ACCEPT
+  CLOSE
+  REOPEN
+}
+
+model RiskMonitoringAssignment {
+  id                   String                         @id @default(uuid())
+  companyId            String
+  riskId               String
+  assignedUserId       String
+  assignedById         String
+  previousAssignmentId String?
+  status               RiskMonitoringAssignmentStatus @default(PENDING)
+  frequency            RiskMonitoringFrequency        @default(ONCE)
+  scheduledAt          DateTime
+  dueAt                DateTime
+  instructions         String?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  cancelledAt          DateTime?
+  cancelledById        String?
+  cancellationReason   String?
+  reassignmentReason   String?
+  active               Boolean                        @default(true)
+  createdAt            DateTime                       @default(now())
+  updatedAt            DateTime                       @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  risk    Risk    @relation(fields: [riskId], references: [id], onDelete: Cascade)
+
+  assignedUser User @relation("RiskMonitoringAssignedUser", fields: [assignedUserId], references: [id], onDelete: Restrict)
+  assignedBy   User @relation("RiskMonitoringAssignedBy", fields: [assignedById], references: [id], onDelete: Restrict)
+
+  cancelledBy User? @relation("RiskMonitoringCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+
+  previousAssignment     RiskMonitoringAssignment?  @relation("RiskMonitoringReassignment", fields: [previousAssignmentId], references: [id], onDelete: SetNull)
+  replacementAssignments RiskMonitoringAssignment[] @relation("RiskMonitoringReassignment")
+
+  monitoring RiskMonitoring?
+
+  @@index([companyId])
+  @@index([riskId])
+  @@index([assignedUserId])
+  @@index([assignedById])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([dueAt])
+  @@index([active])
+  @@index([companyId, status])
+  @@index([assignedUserId, status])
+  @@index([riskId, dueAt])
+  @@map("risk_monitoring_assignments")
+}
+
+model RiskMonitoring {
+  id                    String                   @id @default(uuid())
+  companyId             String
+  riskId                String
+  assignmentId          String?                  @unique
+  performedById         String
+  reviewerName          String
+  monitoringType        RiskMonitoringType
+  monitoredAt           DateTime
+  currentProbability    Int
+  currentImpact         Int
+  currentResidualLevel  Int
+  previousResidualLevel Int?
+  variation             Int?
+  trend                 RiskMonitoringTrend
+  controlEffectiveness  RiskControlEffectiveness
+  treatmentProgress     Int
+  indicatorsObserved    String?
+  relatedIncidents      String?
+  conclusion            String
+  decision              RiskMonitoringDecision
+  nextReviewAt          DateTime?
+  evidenceNotes         String?
+  createdAt             DateTime                 @default(now())
+
+  company     Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  risk        Risk                      @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  assignment  RiskMonitoringAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  performedBy User                      @relation("RiskMonitoringPerformedBy", fields: [performedById], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@index([riskId])
+  @@index([performedById])
+  @@index([monitoringType])
+  @@index([trend])
+  @@index([decision])
+  @@index([monitoredAt])
+  @@index([nextReviewAt])
+  @@index([companyId, monitoredAt])
+  @@index([riskId, monitoredAt])
+  @@map("risk_monitorings")
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketType {
+  SECURITY_INCIDENT
+  VULNERABILITY
+  ACCESS_REQUEST
+  HARDWARE_ISSUE
+  SOFTWARE_ISSUE
+  ASSET_REQUEST
+  AUDIT_FINDING
+  GENERAL_QUERY
+}
+
+model Ticket {
+  id          Int    @id @default(autoincrement())
+  subject     String
+  description String
+
+  type     TicketType     @default(GENERAL_QUERY)
+  priority TicketPriority @default(MEDIUM)
+  status   TicketStatus   @default(OPEN)
+
+  companyId String
+  company   Company @relation("CompanyTickets", fields: [companyId], references: [id], onDelete: Cascade)
+
+  creatorId String?
+  creator   User?   @relation("TicketCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+
+  assigneeId String?
+  assignee   User?   @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([creatorId])
+  @@index([assigneeId])
+  @@index([assetId])
+  @@map("tickets")
+}
+
+model Notification {
+  id    String  @id @default(uuid())
+  title String
+  body  String
+  type  String
+  read  Boolean @default(false)
+  link  String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([read])
+  @@map("notifications")
+}
+
+model Conversation {
+  id        String               @id @default(uuid())
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  members   ConversationMember[]
+  messages  Message[]
+
+  @@map("conversations")
+}
+
+model ConversationMember {
+  id             String       @id @default(uuid())
+  conversationId String
+  userId         String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([conversationId])
+  @@index([userId])
+  @@map("conversation_members")
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String   @db.Text
+  read           Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@map("messages")
+}
